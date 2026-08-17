@@ -37,12 +37,24 @@ splice_product([Choice|Rest], Acc, Rows) :-
 
 %% extend_rows(+Rows, +Values, -Extended)
 %
-% For each existing row and each value, append value to row.
-extend_rows([], _, []) :- !.
-extend_rows([Row|Rows], Values, Extended) :-
+% For each existing row and each value, append the value to the row.
+% Uses an accumulator for O(n) list construction.
+extend_rows(Rows, Values, Extended) :-
+    extend_rows_acc(Rows, Values, [], RevExtended),
+    reverse(RevExtended, Extended).
+
+extend_rows_acc([], _, Acc, Acc) :- !.
+extend_rows_acc([Row|Rows], Values, Acc, Result) :-
     extend_one_row(Row, Values, RowExtended),
-    extend_rows(Rows, Values, RestExtended),
-    append(RowExtended, RestExtended, Extended).
+    prepend_reversed(RowExtended, Acc, Acc1),
+    extend_rows_acc(Rows, Values, Acc1, Result).
+
+%% prepend_reversed(+List, +Acc, -NewAcc)
+%
+% Add List elements to Acc in reverse order (so reverse/2 restores order).
+prepend_reversed([], Acc, Acc) :- !.
+prepend_reversed([H|T], Acc, Result) :-
+    prepend_reversed(T, [H|Acc], Result).
 
 extend_one_row(_, [], []) :- !.
 extend_one_row(Row, [V|Vs], [NewRow|Rest]) :-

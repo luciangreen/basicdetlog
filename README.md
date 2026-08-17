@@ -182,7 +182,7 @@ guard(:Condition)
 Committed condition: succeeds once if Condition succeeds, fails once otherwise.
 
 ```prolog
-?- guard(X > 0), X = 5.
+?- X = 5, guard(X > 0).
 X = 5.
 ```
 

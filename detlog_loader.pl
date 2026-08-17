@@ -3,7 +3,7 @@
     load_generated/3
 ]).
 
-%% load_generated(+Terms, -Module)
+%% load_generated(+Terms, +Module)
 %
 % Assert generated Prolog terms into a named dynamic module.
 load_generated(Terms, detlog_generated) :-
@@ -45,8 +45,8 @@ assert_one_term(Term, Module) :-
         ),
         catch(
             assertz(Module:Clause),
-            _Error,
-            true   % Silently ignore assertion errors
+            error(permission_error(modify, static_procedure, _), _),
+            true   % Ignore attempts to assert into static predicates
         )
     ).
 
