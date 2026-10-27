@@ -102,7 +102,9 @@ transform_cut_single(F, A, (Head :- Body), Generated, Classification) :-
         NewBody = once_det(BodyNoCut),
         Generated = [(Head :- NewBody)]
     ;   Classification = if_commit
-    ->  Generated = [(Head :- Body)]
+    ->  extract_if_commit_parts(Body, Cond, Then),
+        NewBody = if_commit(Cond, Then, fail),
+        Generated = [(Head :- NewBody)]
     ;   % unsupported or other
         Generated = [(Head :- Body)]
     ).
@@ -119,13 +121,17 @@ transform_cut_single(_F, _A, Fact, [Fact], deterministic_select).
 %   p(SharedArgs, R) :- if_commit(Cond, R = ThenResult, R = ElseResult).
 % for simple single-output predicates.
 transform_two_clause_if_commit(F, _A, C1, C2, Generated) :-
-    C1 = (Head1 :- Body1),
-    C2 = (Head2 :- Body2),
+    clause_parts(C1, Head1, Body1),
+    clause_parts(C2, Head2, Body2),
     extract_if_commit_parts(Body1, Cond, ThenBody),
     Head1 =.. [F | Args1],
     Head2 =.. [F | Args2],
     build_if_commit_clause(F, Args1, Args2, Cond, ThenBody, Body2, NewClause),
     Generated = [NewClause].
+
+clause_parts((Head :- Body), Head, Body) :-
+    !.
+clause_parts(Head, Head, true).
 
 %% build_if_commit_clause(+F, +Args1, +Args2, +Cond, +ThenBody, +ElseBody, -Clause)
 %
@@ -185,8 +191,8 @@ goals_to_goal(Goals, Goal) :-
 %% extract_if_commit_parts(+Body, -Cond, -Then)
 %
 % Match body patterns that represent if-commit (cut-based selection):
-%   (Cond, !, Then) → Cond, Then
-%   (Cond, !)       → Cond, true
+%   (Cond, !, Then) -> Cond, Then
+%   (Cond, !)       -> Cond, true
 extract_if_commit_parts((Cond, !, Then), Cond, Then) :- !.
 extract_if_commit_parts((Cond, !),       Cond, true) :- !.
 

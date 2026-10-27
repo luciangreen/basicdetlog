@@ -12,9 +12,11 @@ load_generated(Terms, detlog_generated) :-
 %% load_generated(+Terms, +ModuleName, +Options)
 %
 % Options:
-%   code(true)   — print generated code to stdout
-%   code(File)   — save generated code to File
+%   code(true)   - print generated code to stdout
+%   code(File)   - save generated code to File
 load_generated(Terms, ModuleName, Options) :-
+    ensure_runtime_imports(Terms, ModuleName),
+    clear_generated_predicates(Terms, ModuleName),
     assert_terms(Terms, ModuleName),
     (   memberchk(code(true), Options)
     ->  print_generated_code(Terms)
@@ -22,6 +24,45 @@ load_generated(Terms, ModuleName, Options) :-
     ->  save_generated_code(Terms, File)
     ;   true
     ).
+
+ensure_runtime_imports(Terms, ModuleName) :-
+    runtime_imports(Terms, Imports),
+    (   Imports = []
+    ->  true
+    ;   use_module(ModuleName:detlog_cut, Imports)
+    ).
+
+runtime_imports(Terms, Imports) :-
+    findall(PredicateIndicator,
+        ( runtime_helper(PredicateIndicator, Pattern),
+          sub_term(Pattern, Terms)
+        ),
+        Imports0),
+    sort(Imports0, Imports).
+
+runtime_helper(once_det/1, once_det(_)).
+runtime_helper(if_commit/3, if_commit(_, _, _)).
+
+clear_generated_predicates(Terms, ModuleName) :-
+    findall(F/A,
+        ( member(Term, Terms),
+          generated_head(Term, Head),
+          functor(Head, F, A)
+        ),
+        PredicateIndicators0),
+    sort(PredicateIndicators0, PredicateIndicators),
+    maplist(clear_generated_predicate(ModuleName), PredicateIndicators).
+
+generated_head((Head :- _Body), Head) :-
+    callable(Head),
+    !.
+generated_head(Head, Head) :-
+    callable(Head),
+    \+ is_list(Head).
+
+clear_generated_predicate(ModuleName, F/A) :-
+    functor(Head, F, A),
+    retractall(ModuleName:Head).
 
 assert_terms([], _).
 assert_terms([Term|Rest], ModuleName) :-
@@ -37,17 +78,7 @@ assert_one_term(Term, Module) :-
     ),
     (   Clause = skip
     ->  true
-    ;   Clause = (H :- _),
-        functor(H, F, A),
-        (   \+ current_predicate(Module:F/A)
-        ->  true
-        ;   true   % Already declared; assertz will add a clause
-        ),
-        catch(
-            assertz(Module:Clause),
-            error(permission_error(modify, static_procedure, _), _),
-            true   % Ignore attempts to assert into static predicates
-        )
+    ;   assertz(Module:Clause)
     ).
 
 print_generated_code(Terms) :-
@@ -56,22 +87,27 @@ print_generated_code(Terms) :-
     writeln('--- End Generated Code ---').
 
 print_term_code(Term) :-
-    (   Term = (Head :- Body)
-    ->  format("~w :-~n    ~w.~n~n", [Head, Body])
-    ;   format("~w.~n~n", [Term])
-    ).
+    write_term(Term, [quoted(true), numbervars(true), fullstop(true), nl(true)]),
+    nl.
 
 save_generated_code(Terms, File) :-
     setup_call_cleanup(
         open(File, write, Stream),
-        (   format(Stream, ':- module(detlog_generated, []).~n~n', []),
+        (   format(Stream, ':- module(detlog_generated, []).~n', []),
+            write_runtime_imports(Stream, Terms),
             maplist(write_term_code(Stream), Terms)
         ),
         close(Stream)
     ).
 
-write_term_code(Stream, Term) :-
-    (   Term = (Head :- Body)
-    ->  format(Stream, "~w :-~n    ~w.~n~n", [Head, Body])
-    ;   format(Stream, "~w.~n~n", [Term])
+write_runtime_imports(Stream, Terms) :-
+    runtime_imports(Terms, Imports),
+    (   Imports = []
+    ->  nl(Stream)
+    ;   format(Stream, ':- use_module(detlog_cut, ~q).~n~n', [Imports])
     ).
+
+write_term_code(Stream, Term) :-
+    write_term(Stream, Term,
+               [quoted(true), numbervars(true), fullstop(true), nl(true)]),
+    nl(Stream).

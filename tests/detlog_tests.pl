@@ -1,3 +1,5 @@
+:- encoding(utf8).
+
 :- module(detlog_tests, []).
 
 :- use_module(library(plunit)).
@@ -17,6 +19,9 @@
 det_goal(Goal) :-
     aggregate_all(count, Goal, Count),
     Count =:= 1.
+
+decision_test_condition(Value) :-
+    Value > 0.
 
 % ============================================================
 % Stage 1: cp/1 construction
@@ -245,6 +250,11 @@ test(decision_default_branch) :-
 test(decision_no_branch, [fail]) :-
     decision([branch(fail, x)], _).
 
+test(decision_uses_caller_context) :-
+    decision([branch(decision_test_condition(5), positive),
+              branch(true, other)], Result),
+    Result == positive.
+
 :- end_tests(decision).
 
 % ============================================================
@@ -333,7 +343,7 @@ test(analyse_rule_with_cut) :-
 test(transform_simple_facts) :-
     Terms = [colour(red), colour(blue)],
     detlog_transform:transform_terms(Terms, Generated, _Diag),
-    member((colour_choices(cp([red,blue])) :- true), Generated).
+    once(member((colour_choices(cp([red,blue])) :- true), Generated)).
 
 test(transform_single_fact) :-
     Terms = [foo(bar)],
@@ -343,7 +353,7 @@ test(transform_single_fact) :-
 test(cp_values_preserved) :-
     Terms = [size(small), size(medium), size(large)],
     detlog_transform:transform_terms(Terms, Generated, _Diag),
-    member((size_choices(cp([small,medium,large])) :- true), Generated).
+    once(member((size_choices(cp([small,medium,large])) :- true), Generated)).
 
 :- end_tests(generated_cp).
 
@@ -356,8 +366,18 @@ test(cp_values_preserved) :-
 test(first_solution_cut_diagnostic) :-
     Terms = [candidate(a), candidate(b), candidate(c),
              (choose(X) :- candidate(X), !)],
-    detlog_transform:transform_terms(Terms, _Generated, Diagnostics),
-    member(conversion(choose/1, converted, _), Diagnostics).
+    detlog_transform:transform_terms(Terms, Generated, Diagnostics),
+    member(conversion(choose/1, converted, _), Diagnostics),
+    member((choose(_) :- once_det(_)), Generated).
+
+test(if_commit_fact_else_clause_converts) :-
+    Terms = [
+        (classify(X, positive) :- X > 0, !),
+        classify(_, non_positive)
+    ],
+    detlog_transform:transform_terms(Terms, Generated, Diagnostics),
+    member(conversion(classify/2, converted, if_commit_pattern), Diagnostics),
+    member((classify(_,_) :- if_commit(_,_,_)), Generated).
 
 test(unsupported_cut_fallback) :-
     Terms = [(dynamic_test(X) :- call(_G), !, X = done)],
@@ -392,6 +412,17 @@ test(load_choices) :-
     detlog_transform:transform_terms(Terms, Generated, _Diag),
     detlog_loader:load_generated(Generated, detlog_fruit_module, []),
     call(detlog_fruit_module:fruit_choices(cp([apple,banana,cherry]))).
+
+test(reload_replaces_previous_clauses) :-
+    detlog_loader:load_generated([version(old)], detlog_reload_module, []),
+    detlog_loader:load_generated([version(new)], detlog_reload_module, []),
+    \+ call(detlog_reload_module:version(old)),
+    call(detlog_reload_module:version(new)).
+
+test(reload_preserves_all_current_clauses) :-
+    detlog_loader:load_generated([item(first), item(second)], detlog_multi_module, []),
+    findall(Value, detlog_multi_module:item(Value), Values),
+    Values == [first, second].
 
 :- end_tests(generated_loading).
 
@@ -477,6 +508,48 @@ test(splice_two_det) :-
     det_goal(splice([cp([1,2]), cp([a,b])], _)).
 
 :- end_tests(determinism_tests).
+
+% ============================================================
+% Public API and generated source
+% ============================================================
+
+:- begin_tests(public_api).
+
+test(detlog_executes_generated_choices) :-
+    detlog('examples/colours.pl', colour_choices(Choices)),
+    Choices == cp([red, blue]).
+
+test(detlog_compiles_cut_examples) :-
+    detlog_compile('examples/cuts.pl', []),
+    detlog_compile('examples/cuts.pl', []),
+    findall(Value, detlog_generated:choose(Value), Values),
+    Values == [a],
+    detlog_generated:classify(5, positive),
+    \+ detlog_generated:classify(5, non_positive).
+
+test(code_option_writes_loadable_terms) :-
+    tmp_file(detlog_code, File),
+    setup_call_cleanup(
+        true,
+        ( detlog_loader:load_generated(
+              [(generated_value('needs quoting') :- once_det(true))],
+              detlog_code_module,
+                                       [code(File)]),
+          setup_call_cleanup(
+              open(File, read, Stream),
+              ( read_term(Stream, ModuleDirective, []),
+                read_term(Stream, ImportDirective, []),
+                read_term(Stream, GeneratedTerm, [])
+              ),
+              close(Stream)),
+          ModuleDirective = (:- module(detlog_generated, [])),
+          ImportDirective = (:- use_module(detlog_cut, Imports)),
+          memberchk(once_det/1, Imports),
+          GeneratedTerm = (generated_value('needs quoting') :- once_det(true))
+        ),
+        ( exists_file(File) -> delete_file(File) ; true )).
+
+:- end_tests(public_api).
 
 % ============================================================
 % End of tests

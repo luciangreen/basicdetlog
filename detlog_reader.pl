@@ -8,7 +8,7 @@
 % Returns a list of terms (facts, rules, directives).
 read_source(File, Terms) :-
     setup_call_cleanup(
-        open(File, read, Stream),
+        open(File, read, Stream, [encoding(utf8)]),
         read_terms_from_stream(Stream, Terms),
         close(Stream)
     ).

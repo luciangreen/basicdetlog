@@ -8,6 +8,12 @@
     classify_cut/3
 ]).
 
+:- meta_predicate
+    once_det(0),
+    guard(0),
+    decision(:, -),
+    if_commit(0, 0, 0).
+
 %% first(+Candidates, -First)
 %
 % Deterministically select the first element of a list.
@@ -42,11 +48,15 @@ guard(Condition) :-
 %
 % Example:
 %   decision([branch(X>10, large), branch(X>0, positive), branch(true, other)], R).
-decision([branch(Cond, Result)|_], Result) :-
-    call(Cond),
+decision(Branches0, Result) :-
+    strip_module(Branches0, Context, Branches),
+    decision_branches(Branches, Context, Result).
+
+decision_branches([branch(Cond, Result)|_], Context, Result) :-
+    call(Context:Cond),
     !.
-decision([_|Rest], Result) :-
-    decision(Rest, Result).
+decision_branches([_|Rest], Context, Result) :-
+    decision_branches(Rest, Context, Result).
 
 %% if_commit(:Condition, :Then, :Else)
 %
@@ -63,9 +73,7 @@ if_commit(_Condition, _Then, Else) :-
 %% loop_exit(+Reason)
 %
 % Explicit representation of a committed loop termination.
-% In BASIC Detlog this simply throws a controlled exception
-% that loop wrappers may catch, or succeeds as a marker.
-% The BASIC version records the exit reason as a diagnostic.
+% Throws a controlled exception that loop wrappers may catch.
 loop_exit(Reason) :-
     throw(detlog_loop_exit(Reason)).
 
@@ -83,8 +91,8 @@ classify_cut(Body, _PI, Classification) :-
 % A body that is just a cut: first_solution
 body_cut_classification('!', first_solution) :- !.
 
-% A conjunction ending in cut after a test: if_commit
-body_cut_classification((Cond, '!'), if_commit) :-
+% A terminal cut commits to the first result of the preceding goals.
+body_cut_classification((Cond, '!'), first_solution) :-
     \+ contains_meta_call(Cond),
     !.
 body_cut_classification((Cond, '!', _), if_commit) :-

@@ -80,6 +80,18 @@ Flatten nested packets:
 R = cp([1,2,3,4]).
 ```
 
+### cp_list/2
+
+Extract packet values while flattening nested packets. A fixed value becomes
+a singleton list:
+
+```prolog
+?- cp_list(cp([a, cp([b,c])]), Values).
+Values = [a,b,c].
+?- cp_list(fixed, Values).
+Values = [fixed].
+```
+
 ---
 
 ## splice/2 — Cartesian Combination
@@ -224,6 +236,18 @@ loop_exit(+Reason)
 Explicit representation of committed loop termination. Throws a
 `detlog_loop_exit(Reason)` exception.
 
+```prolog
+?- catch(loop_exit(done), detlog_loop_exit(Reason), true).
+Reason = done.
+```
+
+### classify_cut/3
+
+`classify_cut(+Body, +PredicateIndicator, -Classification)` classifies a cut
+as `first_solution`, `if_commit`, `deterministic_select`, or
+`unsupported(Reason)`. It is an analysis helper exported by `detlog_cut`;
+the source transformer uses it when reporting cut conversions.
+
 ---
 
 ## Fallback Behaviour
@@ -286,6 +310,14 @@ detlog_compile(+InputFile, +Options)
 ```
 
 Read, analyse, transform, and load without executing a goal.
+Generated clauses replace existing clauses with the same predicate
+indicators in the `detlog_generated` module, so recompiling does not leave
+stale alternatives behind.
+
+The `code(true)` option prints generated clauses; `code(File)` writes them to
+a Prolog file with a `detlog_generated` module declaration and any required
+imports from `detlog_cut`. The file contains transformed source clauses, not
+the Detlog runtime modules themselves.
 
 ---
 
@@ -329,8 +361,32 @@ Rows = [[1,10,11],[1,20,21],[2,10,12],[2,20,22]].
 
 ## Running the Tests
 
+Install SWI-Prolog, then run all PL-Unit tests from the repository root:
+
 ```bash
-swipl -g "load_test_files([]), run_tests, halt" tests/detlog_tests.pl
+swipl -q -s tests/detlog_tests.pl -g run_tests -t halt
+```
+
+The test suites cover packet construction and normalization, splice products
+and ordering, deterministic control helpers, analysis and transformation,
+fallback diagnostics, generated-module loading/reloading, the public API, and
+integration examples. Run focused suites by name:
+
+```bash
+swipl -q -s tests/detlog_tests.pl \
+  -g "run_tests([generated_loading,public_api])" -t halt
+```
+
+To try the examples interactively, start SWI-Prolog in the repository root:
+
+```prolog
+?- use_module(detlog).
+?- detlog('examples/colours.pl', colour_choices(Choices)).
+Choices = cp([red, blue]).
+
+?- use_module(detlog_splice).
+?- splice([cp([1,2]), cp([x,y])], Rows).
+Rows = [[1,x],[1,y],[2,x],[2,y]].
 ```
 
 ---
@@ -355,13 +411,27 @@ swipl -g "load_test_files([]), run_tests, halt" tests/detlog_tests.pl
 
 - **BASIC scope only**: does not implement memoisation, concurrency, loop
   synthesis, formula optimisation, or Starlog syntax.
-- **Simple predicates only**: the converter handles finite fact predicates
-  and simple rules. Predicates with arithmetic generators or `findall/3`
-  are kept as-is (fallback).
-- **Cut support is limited**: only `first_solution` and simple `if_commit`
-  patterns are converted; all other cuts produce `fallback`.
+- **Choice conversion currently covers facts**: multiple unit facts produce a
+  `Name_choices/1` packet predicate. Single facts and rule clauses are
+  preserved unchanged; rules are not made deterministic by transformation.
+- **Cut support is limited**: terminal first-solution cuts and the supported
+  two-clause if-commit pattern are converted to `once_det/1` and `if_commit/3`;
+  unsupported cut patterns are retained unchanged and reported as `fallback`.
 - **No module analysis**: the converter does not track cross-module
   predicate definitions.
 - **Generated code uses assertz**: loaded terms are asserted into a named
   module at runtime; no file-based compilation is performed unless
   `code(File)` is specified.
+
+## Implementation Status
+
+| Feature | Status |
+|---|---|
+| Choice packets, normalization, and Cartesian splice | Implemented and tested |
+| Runtime deterministic helpers (`first/2`, `once_det/1`, `guard/1`, `decision/2`, `if_commit/3`, `loop_exit/1`) | Implemented and tested |
+| Multiple-fact choice-predicate generation | Implemented and tested |
+| First-solution cuts, supported if-commit cuts, fallback diagnostics | Implemented with narrow pattern matching |
+| Replacing previously generated predicates on recompilation | Implemented and tested |
+| Deterministic conversion of arbitrary rule bodies and choice composition through rule calls | Remaining |
+| Module-aware source/import analysis and validation of directives | Remaining |
+| Memoisation, concurrency, loop synthesis, formula optimization, and Starlog syntax | Out of BASIC scope |
