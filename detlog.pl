@@ -1,3 +1,5 @@
+:- encoding(utf8).
+
 %% detlog.pl — Public API for BASIC Detlog
 %
 % Converts ordinary SWI-Prolog source into an explicit deterministic
@@ -14,7 +16,7 @@
 :- use_module(detlog_loader,    [load_generated/3]).
 :- use_module(detlog_report,    [print_trace/2, print_diagnostics/1]).
 
-% Re-export the runtime predicates so users can call them after detlog/2.
+% Load runtime predicates used by the compiler and generated clauses.
 :- use_module(detlog_choices,   [member_cp/2, normalise_cp/2, cp_list/2]).
 :- use_module(detlog_splice,    [splice/2]).
 :- use_module(detlog_cut,       [first/2, once_det/1, guard/1,
