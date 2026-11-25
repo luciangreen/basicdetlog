@@ -393,6 +393,20 @@ test(if_commit_pattern_detected) :-
     member(conversion(classify/2, converted, if_commit_pattern), Diagnostics),
     member((classify(_,_) :- if_commit(_,_,_)), Generated).
 
+% max(X, Y, X) repeats X in its head: the three positions must stay apart.
+test(if_commit_repeated_head_variable) :-
+    Terms = [
+        (max(X, Y, X) :- X >= Y, !),
+        max(_, Y2, Y2)
+    ],
+    detlog_transform:transform_terms(Terms, [Clause], Diagnostics),
+    member(conversion(max/3, converted, if_commit_pattern), Diagnostics),
+    findall(Q, ( member(Q, [max(3,5,_), max(5,3,_), max(4,4,_)]),
+                 copy_term(Clause, (Q :- Body)), call(Body) ), Answers),
+    Answers == [max(3,5,5), max(5,3,5), max(4,4,4)],
+    copy_term(Clause, (max(5,3,3) :- Body2)),
+    \+ call(Body2).
+
 :- end_tests(cut_conversion).
 
 % ============================================================
