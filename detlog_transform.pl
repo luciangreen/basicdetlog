@@ -142,11 +142,30 @@ clause_parts(Head, Head, true).
 build_if_commit_clause(F, Args1, Args2, Cond, ThenBody, ElseBody, Clause) :-
     length(Args1, Arity),
     length(NewArgs, Arity),
-    build_arg_goals(Args1, Args2, NewArgs, ThenGoals, ElseGoals),
+    build_arg_goals(Args1, Args2, Args1, Args2, NewArgs, ThenGoals0, ElseGoals),
+    % Head bindings the condition needs (max(X, Y, X) :- X >= Y needs X and Y)
+    % are made before it; the rest, such as outputs, after it.
+    term_variables(Cond, CondVars),
+    split_pre(ThenGoals0, CondVars, PreGoals, ThenGoals),
     NewHead =.. [F | NewArgs],
+    goals_to_goal(PreGoals, Pre),
+    ( Pre == true -> Cond1 = Cond ; Cond1 = (Pre, Cond) ),
     goals_to_goal([ThenBody | ThenGoals], ThenGoal),
     goals_to_goal([ElseBody | ElseGoals], ElseGoal),
-    Clause = (NewHead :- if_commit(Cond, ThenGoal, ElseGoal)).
+    Clause = (NewHead :- if_commit(Cond1, ThenGoal, ElseGoal)).
+
+% split_pre(+Goals, +CondVars, -Pre, -Post): a goal NewArg = T goes before the
+% condition if T holds a condition variable no earlier goal has bound; other
+% goals, such as one that also gives an output that value, go after it.
+split_pre([], _, [], []).
+split_pre([G|Gs], Vars, Pre, Post) :-
+    G = (_ = T),
+    term_variables(T, TVs),
+    (   member(V, TVs), member(W, Vars), V == W
+    ->  drop_vars(Vars, TVs, Vars1),
+        Pre = [G|Pre1], split_pre(Gs, Vars1, Pre1, Post)
+    ;   Post = [G|Post1], split_pre(Gs, Vars, Pre, Post1)
+    ).
 
 %% build_arg_goals(+Args1, +Args2, +NewArgs, -ThenGoals, -ElseGoals)
 %
@@ -154,18 +173,18 @@ build_if_commit_clause(F, Args1, Args2, Cond, ThenBody, ElseBody, Clause) :-
 %   - If Args1[i] and Args2[i] are both variables or equal: use same NewArgs[i]
 %   - If they differ: NewArgs[i] is fresh, ThenGoals gets NewArg = Args1[i],
 %                     ElseGoals gets NewArg = Args2[i]
-build_arg_goals([], [], [], [], []).
-build_arg_goals([A1|As1], [A2|As2], [NA|NAs], ThenGs, ElseGs) :-
-    build_arg_goals(As1, As2, NAs, ThenRest, ElseRest),
-    (   var(A1), var(A2)
+build_arg_goals(_, _, [], [], [], [], []).
+build_arg_goals(H1, H2, [A1|As1], [A2|As2], [NA|NAs], ThenGs, ElseGs) :-
+    build_arg_goals(H1, H2, As1, As2, NAs, ThenRest, ElseRest),
+    (   var(A1), var(A2), occurs_once(A1, H1), occurs_once(A2, H2)
     ->  NA = A1, A2 = A1,
         ThenGs = ThenRest,
         ElseGs = ElseRest
-    ;   var(A1), \+ var(A2)
+    ;   var(A1), \+ var(A2), occurs_once(A1, H1)
     ->  NA = A1,
         ThenGs = ThenRest,
         ElseGs = [A1 = A2 | ElseRest]
-    ;   \+ var(A1), var(A2)
+    ;   \+ var(A1), var(A2), occurs_once(A2, H2)
     ->  NA = A2,
         ThenGs = [A2 = A1 | ThenRest],
         ElseGs = ElseRest
@@ -173,10 +192,25 @@ build_arg_goals([A1|As1], [A2|As2], [NA|NAs], ThenGs, ElseGs) :-
     ->  NA = A1,
         ThenGs = ThenRest,
         ElseGs = ElseRest
-    ;   % Both ground or different: use fresh NewArg
+    ;   % Both ground, different, or a variable used in more than one
+        % position of its head (max(X, Y, X)): a fresh NewArg, bound in each branch
         ThenGs = [NA = A1 | ThenRest],
         ElseGs = [NA = A2 | ElseRest]
     ).
+
+drop_vars([], _, []).
+drop_vars([V|Vs], Drop, Out) :-
+    (   member(D, Drop), D == V
+    ->  Out = Out1
+    ;   Out = [V|Out1]
+    ),
+    drop_vars(Vs, Drop, Out1).
+
+% occurs_once(+Var, +Args): Var appears in exactly one position of Args, as that
+% whole argument, so it can stand for the position itself.
+occurs_once(V, Args) :-
+    include(==(V), Args, [_]),
+    \+ ( member(A, Args), compound(A), term_variables(A, Vs), member(W, Vs), W == V ).
 
 goals_to_goal(Goals, Goal) :-
     exclude(==(true), Goals, Filtered),
